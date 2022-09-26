@@ -1,0 +1,58 @@
+- hosts: all
+  # use privilege (default : root)
+  become: yes
+  vars_files:
+  - env_variables
+  # method to use privilege
+  become_method: sudo
+  tasks:
+  # task settings
+  - name: Disabling Swap on all nodes
+    shell: swapoff -a
+
+  - name: Creating a repository file for Kubernetes
+    file:
+     path: /etc/yum.repos.d/kubernetes.repo
+     state: touch
+
+  - name: Adding repository details in Kubernetes repo file.
+    blockinfile:
+     path: /etc/yum.repos.d/kubernetes.repo
+     block: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+      enabled=1
+      gpgcheck=1
+      repo_gpgcheck=1
+      gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+        https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+
+  - name: Installing Docker
+    shell: |
+     dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+     dnf install https://download.docker.com/linux/centos/7/x86_64/stable/Packages/containerd.io-1.2.6-3.3.el7.x86_64.rpm
+     dnf install docker-ce --nobest -y
+     systemctl start docker
+     systemctl enable docker
+
+  # - name: httpd is installed
+  #   yum:
+  #     name: httpd
+  #     state: present
+
+  # - name: httpd is running and enabled
+  #   service:
+  #     name: httpd
+  #     state: started
+  #     enabled: yes
+
+  # - name: firewalld rules
+  #   ansible.posix.firewalld:
+  #     service: "{{ item }}"
+  #     state: enabled
+  #     permanent: true
+  #     immediate: true
+  #   with_items:
+  #     - http
+  #     - https
