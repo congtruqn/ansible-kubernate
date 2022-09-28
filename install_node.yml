@@ -1,0 +1,108 @@
+- hosts: workers
+  # use privilege (default : root)
+  become: yes
+  vars_files:
+  - env_variables
+  # method to use privilege
+  become_method: sudo
+  tasks:
+  # task settings
+  - name: Setting hostname
+    shell: |
+      hostnamectl set-hostname node-1
+      cat <<EOF>> /etc/hosts
+      192.168.10.189 master
+      192.168.10.199 node-1
+      EOF
+
+  - name: Disabling Swap on all nodes
+    shell: swapoff -a
+
+  - name: disable SELinux
+    command: setenforce 0
+
+  - name: disable SELinux on reboot
+    selinux:
+      state: disabled
+
+  - name: Creating a repository file for Kubernetes
+    file:
+     path: /etc/yum.repos.d/kubernetes.repo
+     state: touch
+
+  - name: Adding repository details in Kubernetes repo file.
+    blockinfile:
+     path: /etc/yum.repos.d/kubernetes.repo
+     block: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+      enabled=1
+      gpgcheck=1
+      repo_gpgcheck=1
+      gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+        https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+
+  - name: Installing Docker
+    shell: |
+     dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+     yum install docker-ce -y --nobest
+
+  - name: Reconfig containerd
+    shell: |
+      rm -rf /etc/containerd/config.toml
+      systemctl restart containerd
+      systemctl enable docker
+      systemctl start docker
+
+  - name: Installing required packages
+    yum:
+     name: "{{ packages }}"
+     state: present
+
+  - name: Starting and Enabling the required services
+    service:
+     name: "{{ item }}"
+     state: started
+     enabled: yes
+    with_items: "{{ services }}"
+
+  - name: Allow Network Ports in Firewalld
+    ansible.posix.firewalld:
+     port: "{{ item }}"
+     state: enabled
+     permanent: yes
+     immediate: yes
+    with_items: "{{ worker_ports }}"
+
+  - name: Allow masquerading in Firewalld
+    ansible.posix.firewalld:
+      masquerade: "yes"
+      state: enabled
+      permanent: yes
+      immediate: yes
+
+  - name: Enabling Bridge Firewall Rule
+    shell: "echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables"
+
+- hosts: master
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: get join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
+
+    - name: set join command
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+
+- hosts: workers
+  become: yes
+  tasks:
+    - name: join cluster
+      shell: "{{ hostvars['master'].join_command }} --ignore-preflight-errors all  >> node_joined.txt"
+      args:
+        chdir: $HOME
+        creates: node_joined.txt
