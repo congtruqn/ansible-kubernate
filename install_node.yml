@@ -13,10 +13,13 @@
       cat <<EOF>> /etc/hosts
       192.168.10.189 master
       192.168.10.199 node-1
+      192.168.10.183 node-2
       EOF
 
   - name: Disabling Swap on all nodes
-    shell: swapoff -a
+    shell: |
+     swapoff -a
+     sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
 
   - name: disable SELinux
     command: setenforce 0
@@ -61,7 +64,7 @@
      state: present
 
   - name: Starting and Enabling the required services
-    systemd:
+    service:
      name: "{{ item }}"
      state: started
      enabled: yes
@@ -74,13 +77,6 @@
      permanent: yes
      immediate: yes
     with_items: "{{ worker_ports }}"
-
-  - name: Allow masquerading in Firewalld
-    ansible.posix.firewalld:
-      masquerade: "yes"
-      state: enabled
-      permanent: yes
-      immediate: yes
 
   - name: Enabling Bridge Firewall Rule
     shell: "echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables"

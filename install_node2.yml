@@ -1,4 +1,4 @@
-- hosts: masters
+- hosts: workers
   # use privilege (default : root)
   become: yes
   vars_files:
@@ -9,7 +9,7 @@
   # task settings
   - name: Setting hostname
     shell: |
-      hostnamectl set-hostname master
+      hostnamectl set-hostname node-2
       cat <<EOF>> /etc/hosts
       192.168.10.189 master
       192.168.10.199 node-1
@@ -23,7 +23,6 @@
 
   - name: disable SELinux
     command: setenforce 0
-    ignore_errors: yes
 
   - name: disable SELinux on reboot
     selinux:
@@ -77,37 +76,29 @@
      state: enabled
      permanent: yes
      immediate: yes
-    with_items: "{{ master_ports }}"
-
-  - name: Allow masquerading in Firewalld
-    ansible.posix.firewalld:
-      masquerade: "yes"
-      state: enabled
-      permanent: yes
-      immediate: yes
+    with_items: "{{ worker_ports }}"
 
   - name: Enabling Bridge Firewall Rule
     shell: "echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables"
 
-  - name: initialize the cluster
-    shell: kubeadm init --apiserver-advertise-address=192.168.10.189 --pod-network-cidr=192.168.0.0/16
-    register: output   
+- hosts: master
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: get join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
 
-  - debug: msg="{{ output }}"
+    - name: set join command
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
 
-  - name: Storing Logs and Generated token for future purpose.
-    local_action: copy content={{ output.stdout }} dest={{ token_file }}
 
-  - name: Copying required files
-    shell: |
-     mkdir -p $HOME/.kube
-     sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
-     sudo chown $(id -u):$(id -g) $HOME/.kube/config
-
-  # - name: Install Network Add-on
-  #   command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
-
-  - name: Install Network Add-on
-    shell: |
-     export kubever=$(kubectl version | base64 | tr -d '\n')
-     kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$kubever"
+- hosts: workers
+  become: yes
+  tasks:
+    - name: join cluster
+      shell: "{{ hostvars['master'].join_command }} --ignore-preflight-errors all  >> node_joined.txt"
+      args:
+        chdir: $HOME
+        creates: node_joined.txt
